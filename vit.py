@@ -189,29 +189,24 @@ class VIT(nn.Module):
                 for _ in range(self.n_blocks)
             ]
         )
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((self.n_patches_h, self.n_patches_w))
+
         self.mlp_classifier = nn.Sequential(
-            nn.Linear(self.hidden_dim, self.out_dim),
+            nn.Linear(self.n_patches_w * self.n_patches_h, self.out_dim),
             nn.Softmax(dim=-1),
         )
 
     def forward(self, x):
-        logger.info(f"Input shape: {x.shape}")
         patches = patch_embedding(x, self.n_patches_w, self.n_patches_h)
-        logger.info(f"Patches shape: {patches.shape}")
         tokens = self.linear_mapping(patches)
-        logger.info(f"Tokens shape: {tokens.shape}")
         tokens = torch.cat(
             (self.class_embedding.expand(x.shape[0], -1, -1), tokens), dim=1
         )
-        logger.info(f"Tokens shape after class embedding: {tokens.shape}")
         out = tokens + self.positional_embedding
-        logger.info(f"Tokens shape after positional embedding: {out.shape}")
         for block in self.blocks:
             out = block(out)
-        logger.info(f"Tokens shape after blocks: {out.shape}")
-        out = out[:, 0]
-        logger.info(f"Tokens shape after slicing: {out.shape}")
-        out = self.mlp_classifier(out)
-        logger.info(f"Output shape: {out.shape}")
 
+        out = self.adaptive_pool(out.unsqueeze(1))
+        out = out.view(out.size(0), -1)
+        out = self.mlp_classifier(out)
         return out
