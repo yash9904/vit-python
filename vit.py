@@ -210,3 +210,65 @@ class VIT(nn.Module):
         out = out.view(out.size(0), -1)
         out = self.mlp_classifier(out)
         return out
+
+
+class VITClassifier(nn.Module):
+    def __init__(
+        self,
+        shape=(1, 28, 28),
+        n_patches_w=7,
+        n_patches_h=7,
+        hidden_dim=8,
+        out_dim=10,
+        n_blocks=2,
+        n_heads=2,
+        encoder_mlp_ratio=4,
+    ):
+        super(VITClassifier, self).__init__()
+        self.input_shape = shape
+        self.hidden_dim = hidden_dim
+        self.n_patches_w = n_patches_w
+        self.n_patches_h = n_patches_h
+        self.out_dim = out_dim
+        self.n_heads = n_heads
+        self.n_blocks = n_blocks
+        self.encoder_mlp_ratio = encoder_mlp_ratio
+        assert (
+            shape[1] % n_patches_h == 0 and shape[2] % n_patches_w == 0
+        ), "The number of patches should be a divisor of the image size in both dimensions"
+        self.patch_size = (shape[1] // n_patches_h, shape[2] // n_patches_w)
+        self.class_embedding = nn.Parameter(torch.randn(1, 1, hidden_dim))
+        self.input_dim = int(shape[0] * self.patch_size[0] * self.patch_size[1])
+        self.linear_mapping = nn.Linear(self.input_dim, self.hidden_dim)
+        self.positional_embedding = nn.Parameter(
+            torch.tensor(
+                positional_embedding((n_patches_w * n_patches_h) + 1, hidden_dim),
+            ),
+            requires_grad=False,
+        )
+        self.transformer_encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=self.hidden_dim,
+                nhead=self.n_heads,
+                dim_feedforward=self.hidden_dim * self.encoder_mlp_ratio,
+            ),
+            num_layers=self.n_blocks,
+        )
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((self.n_patches_h, self.n_patches_w))
+        self.mlp_classifier = nn.Sequential(
+            nn.Linear(self.n_patches_w * self.n_patches_h, self.out_dim),
+            nn.Softmax(dim=-1),
+        )
+
+    def forward(self, x):
+        patches = patch_embedding(x, self.n_patches_w, self.n_patches_h)
+        tokens = self.linear_mapping(patches)
+        tokens = torch.cat(
+            (self.class_embedding.expand(x.shape[0], -1, -1), tokens), dim=1
+        )
+        out = tokens + self.positional_embedding
+        out = self.transformer_encoder(out)
+        out = self.adaptive_pool(out.unsqueeze(1))
+        out = out.view(out.size(0), -1)
+        out = self.mlp_classifier(out)
+        return out

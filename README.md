@@ -1,1 +1,1 @@
-# vit-python
+# Implementation of Vision Transformers for Image Classification from scratch
